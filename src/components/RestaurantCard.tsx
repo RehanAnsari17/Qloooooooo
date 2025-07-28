@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Heart, ThumbsDown, Info, Star, Phone, Globe, MapPin, ExternalLink } from 'lucide-react';
+import { Heart, ThumbsDown, Info, Star, Phone, Globe, MapPin, ExternalLink, Clock, Utensils, CreditCard, Armchair as Wheelchair, Baby, Car, Beer, Wifi, ParkingCircle, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 
@@ -28,23 +28,65 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
   onPreferenceSaved 
 }) => {
   const [userPreference, setUserPreference] = useState<'like' | 'dislike' | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [pendingPreference, setPendingPreference] = useState<'like' | 'dislike' | null>(null);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [restaurantDetails, setRestaurantDetails] = useState<any>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const handlePreference = async (preference: 'like' | 'dislike') => {
+    setPendingPreference(preference);
+    setShowFeedbackModal(true);
+  };
+
+  const handleFeedbackSubmit = async () => {
+    if (!pendingPreference) return;
+    
+    setIsSubmittingFeedback(true);
+    
     try {
       await axios.post('http://localhost:8000/api/restaurant-preference', {
         restaurant_id: restaurant.id,
-        preference: preference,
-        session_id: sessionId
+        preference: pendingPreference,
+        session_id: sessionId,
+        feedback: feedbackText.trim() || null
       });
       
-      setUserPreference(preference);
-      onPreferenceSaved(restaurant.id, preference);
+      setUserPreference(pendingPreference);
+      onPreferenceSaved(restaurant.id, pendingPreference);
+      
+      // Reset feedback modal state
+      setShowFeedbackModal(false);
+      setFeedbackText('');
+      setPendingPreference(null);
+      
+      // Store feedback locally as well
+      const feedbackData = {
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+        preference: pendingPreference,
+        feedback: feedbackText.trim(),
+        timestamp: new Date().toISOString()
+      };
+      
+      // Store in localStorage
+      const existingFeedback = JSON.parse(localStorage.getItem('restaurantFeedback') || '[]');
+      existingFeedback.push(feedbackData);
+      localStorage.setItem('restaurantFeedback', JSON.stringify(existingFeedback));
+      
     } catch (error) {
-      console.error('Error saving preference:', error);
+      console.error('Error saving preference and feedback:', error);
+    } finally {
+      setIsSubmittingFeedback(false);
     }
+  };
+
+  const handleFeedbackCancel = () => {
+    setShowFeedbackModal(false);
+    setFeedbackText('');
+    setPendingPreference(null);
   };
 
   const handleMoreInfo = async () => {
@@ -84,6 +126,37 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
     return stars;
   };
 
+  const formatTime = (timeString: string) => {
+    if (!timeString) return '';
+    // Remove 'T' and format as HH:MM
+    const time = timeString.replace('T', '');
+    const [hours, minutes] = time.split(':');
+    const hour24 = parseInt(hours);
+    const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+    const ampm = hour24 >= 12 ? 'PM' : 'AM';
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const getTagIcon = (tagType: string) => {
+    if (tagType.includes('credit_card') || tagType.includes('payments')) return <CreditCard className="w-4 h-4" />;
+    if (tagType.includes('wheelchair') || tagType.includes('accessibility')) return <Wheelchair className="w-4 h-4" />;
+    if (tagType.includes('children') || tagType.includes('kids')) return <Baby className="w-4 h-4" />;
+    if (tagType.includes('drive_through') || tagType.includes('parking')) return <Car className="w-4 h-4" />;
+    if (tagType.includes('beer') || tagType.includes('alcohol') || tagType.includes('wine')) return <Beer className="w-4 h-4" />;
+    if (tagType.includes('wifi')) return <Wifi className="w-4 h-4" />;
+    if (tagType.includes('parking')) return <ParkingCircle className="w-4 h-4" />;
+    return <Info className="w-4 h-4" />;
+  };
+
+  const getTagColor = (tagType: string) => {
+    if (tagType.includes('credit_card') || tagType.includes('payments')) return 'bg-blue-100 text-blue-700';
+    if (tagType.includes('wheelchair') || tagType.includes('accessibility')) return 'bg-green-100 text-green-700';
+    if (tagType.includes('children') || tagType.includes('kids')) return 'bg-pink-100 text-pink-700';
+    if (tagType.includes('drive_through') || tagType.includes('parking')) return 'bg-purple-100 text-purple-700';
+    if (tagType.includes('beer') || tagType.includes('alcohol') || tagType.includes('wine')) return 'bg-amber-100 text-amber-700';
+    if (tagType.includes('wifi')) return 'bg-indigo-100 text-indigo-700';
+    return 'bg-gray-100 text-gray-700';
+  };
   return (
     <>
       <motion.div
@@ -216,18 +289,18 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
 
       {/* Restaurant Details Modal */}
       {showDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+            className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto my-8"
           >
             <div className="p-6">
               <div className="flex justify-between items-start mb-4">
                 <h2 className="text-2xl font-bold text-gray-900">{restaurant.name}</h2>
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                  className="text-gray-400 hover:text-gray-600 text-2xl font-bold w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
                 >
                   ×
                 </button>
@@ -237,92 +310,220 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
                 <img
                   src={restaurant.image_url}
                   alt={restaurant.name}
-                  className="w-full h-64 object-cover rounded-lg mb-4"
+                  className="w-full h-64 object-cover rounded-lg mb-6"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = 'https://images.pexels.com/photos/262978/pexels-photo-262978.jpeg';
                   }}
                 />
               )}
 
-              <div className="space-y-4">
-                {restaurant.rating && (
-                  <div className="flex items-center space-x-2">
-                    <span className="font-medium">Rating:</span>
-                    <div className="flex items-center space-x-1">
-                      <div className="flex">
-                        {renderStars(restaurant.rating)}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left Column - Basic Info */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 border-b pb-2">Basic Information</h3>
+                  
+                  {restaurant.rating && (
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">Rating:</span>
+                      <div className="flex items-center space-x-1">
+                        <div className="flex">
+                          {renderStars(restaurant.rating)}
+                        </div>
+                        <span className="text-gray-600">({restaurant.rating}/5)</span>
                       </div>
-                      <span className="text-gray-600">({restaurant.rating}/5)</span>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {restaurant.cuisine_type && (
-                  <div>
-                    <span className="font-medium">Cuisine:</span>
-                    <span className="ml-2 text-gray-600">{restaurant.cuisine_type}</span>
-                  </div>
-                )}
-
-                {restaurant.price_range && (
-                  <div>
-                    <span className="font-medium">Price Range:</span>
-                    <span className="ml-2 text-gray-600">{restaurant.price_range}</span>
-                  </div>
-                )}
-
-                {restaurant.description && (
-                  <div>
-                    <span className="font-medium">Description:</span>
-                    <p className="text-gray-600 mt-1">{restaurant.description}</p>
-                  </div>
-                )}
-
-                {restaurant.address && (
-                  <div className="flex items-start">
-                    <MapPin className="w-5 h-5 mr-2 text-gray-400 mt-0.5" />
+                  {restaurant.cuisine_type && (
                     <div>
-                      <span className="font-medium">Address:</span>
-                      <p className="text-gray-600">{restaurant.address}</p>
+                      <span className="font-medium">Cuisine:</span>
+                      <span className="ml-2 text-gray-600">{restaurant.cuisine_type}</span>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {restaurant.phone && (
-                  <div className="flex items-center">
-                    <Phone className="w-5 h-5 mr-2 text-gray-400" />
-                    <span className="font-medium">Phone:</span>
-                    <a href={`tel:${restaurant.phone}`} className="ml-2 text-blue-600 hover:underline">
-                      {restaurant.phone}
-                    </a>
-                  </div>
-                )}
+                  {restaurant.price_range && (
+                    <div>
+                      <span className="font-medium">Price Range:</span>
+                      <span className="ml-2 text-gray-600">{restaurant.price_range}</span>
+                    </div>
+                  )}
 
-                {restaurant.website && (
-                  <div className="flex items-center">
-                    <Globe className="w-5 h-5 mr-2 text-gray-400" />
-                    <span className="font-medium">Website:</span>
-                    <a 
-                      href={restaurant.website} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="ml-2 text-blue-600 hover:underline flex items-center"
-                    >
-                      Visit Website
-                      <ExternalLink className="w-4 h-4 ml-1" />
-                    </a>
-                  </div>
-                )}
+                  {restaurant.description && (
+                    <div>
+                      <span className="font-medium">Description:</span>
+                      <p className="text-gray-600 mt-1 leading-relaxed">{restaurant.description}</p>
+                    </div>
+                  )}
+
+                  {restaurant.address && (
+                    <div className="flex items-start">
+                      <MapPin className="w-5 h-5 mr-2 text-gray-400 mt-0.5" />
+                      <div>
+                        <span className="font-medium">Address:</span>
+                        <p className="text-gray-600">{restaurant.address}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {restaurant.phone && (
+                    <div className="flex items-center">
+                      <Phone className="w-5 h-5 mr-2 text-gray-400" />
+                      <span className="font-medium">Phone:</span>
+                      <a href={`tel:${restaurant.phone}`} className="ml-2 text-blue-600 hover:underline">
+                        {restaurant.phone}
+                      </a>
+                    </div>
+                  )}
+
+                  {restaurant.website && (
+                    <div className="flex items-center">
+                      <Globe className="w-5 h-5 mr-2 text-gray-400" />
+                      <span className="font-medium">Website:</span>
+                      <a 
+                        href={restaurant.website} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="ml-2 text-blue-600 hover:underline flex items-center"
+                      >
+                        Visit Website
+                        <ExternalLink className="w-4 h-4 ml-1" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column - Additional Details */}
+                <div className="space-y-4">
+                  {/* Opening Hours */}
+                  {restaurantDetails?.results?.entities?.[0]?.properties?.hours && (
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 border-b pb-2 mb-3 flex items-center">
+                        <Clock className="w-5 h-5 mr-2" />
+                        Opening Hours
+                      </h3>
+                      <div className="space-y-1">
+                        {Object.entries(restaurantDetails.results.entities[0].properties.hours).map(([day, hours]) => (
+                          <div key={day} className="flex justify-between items-center text-sm">
+                            <span className="font-medium capitalize">{day}:</span>
+                            <span className="text-gray-600">
+                              {Array.isArray(hours) && hours.length > 0 
+                                ? `${formatTime(hours[0].opens)} - ${formatTime(hours[0].closes)}`
+                                : 'Closed'
+                              }
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Specialty Dishes */}
+                  {restaurantDetails?.results?.entities?.[0]?.properties?.specialty_dishes && (
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 border-b pb-2 mb-3 flex items-center">
+                        <Utensils className="w-5 h-5 mr-2" />
+                        Specialty Dishes
+                      </h3>
+                      <div className="grid grid-cols-1 gap-2">
+                        {restaurantDetails.results.entities[0].properties.specialty_dishes.slice(0, 6).map((dish, index) => (
+                          <div key={index} className="bg-orange-50 rounded-lg p-3 border border-orange-100">
+                            <span className="font-medium text-orange-800">{dish.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-6 pt-4 border-t border-gray-200">
+              {/* Amenities and Features */}
+              {restaurantDetails?.results?.entities?.[0]?.tags && (
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Amenities & Features</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {restaurantDetails.results.entities[0].tags
+                      .filter(tag => 
+                        tag.type.includes('credit_card') || 
+                        tag.type.includes('accessibility') || 
+                        tag.type.includes('children') || 
+                        tag.type.includes('service_options') || 
+                        tag.type.includes('offerings') || 
+                        tag.type.includes('payments') ||
+                        tag.type.includes('parking') ||
+                        tag.type.includes('amenity')
+                      )
+                      .slice(0, 12)
+                      .map((tag, index) => (
+                        <div 
+                          key={index} 
+                          className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm ${getTagColor(tag.type)}`}
+                        >
+                          {getTagIcon(tag.type)}
+                          <span className="font-medium truncate">{tag.name}</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-8 pt-4 border-t border-gray-200">
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-white py-3 rounded-lg hover:from-orange-600 hover:to-green-600 transition-all duration-200"
+                  className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-white py-3 rounded-lg hover:from-orange-600 hover:to-green-600 transition-all duration-200 font-medium"
                 >
                   Close Details
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+      {/* Feedback Modal */}
+      {showFeedbackModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className={`bg-white rounded-2xl p-6 w-full max-w-md shadow-xl ${
+              pendingPreference === 'like' ? 'border-t-8 border-green-500' : 'border-t-8 border-gray-400'
+            }`}
+          >
+            <h3 className="text-xl font-bold mb-4 text-gray-900">
+              {pendingPreference === 'like' ? 'Glad you liked it!' : 'Not your taste?'}
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Share your thoughts about <span className="font-semibold">{restaurant.name}</span> (optional):
+            </p>
+            <textarea
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              maxLength={500}
+              className="w-full h-28 p-3 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-orange-500 mb-2"
+              placeholder="Write your feedback here..."
+            />
+            <div className="text-xs text-gray-400 mb-4">
+              {feedbackText.length}/500 characters
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={handleFeedbackCancel}
+                disabled={isSubmittingFeedback}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Skip
+              </button>
+              <button
+                onClick={handleFeedbackSubmit}
+                disabled={isSubmittingFeedback}
+                className={`px-4 py-2 rounded-lg text-white ${
+                  pendingPreference === 'like'
+                    ? 'bg-green-500 hover:bg-green-600'
+                    : 'bg-gray-600 hover:bg-gray-700'
+                } transition-colors`}
+              >
+                {isSubmittingFeedback ? 'Saving...' : 'Submit'}
+              </button>
             </div>
           </motion.div>
         </div>
