@@ -26,7 +26,7 @@ export const RestaurantRecommendations: React.FC<RestaurantRecommendationsProps>
 }) => {
   const handlePreferenceSaved = (restaurantId: string, preference: 'like' | 'dislike') => {
     console.log(`User ${preference}d restaurant ${restaurantId}`);
-    // You can add additional logic here, like showing a toast notification
+    // Additional logic can be added here, like showing a toast notification
   };
 
   if (!restaurants || restaurants.length === 0) {
@@ -37,7 +37,7 @@ export const RestaurantRecommendations: React.FC<RestaurantRecommendationsProps>
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mt-4"
+      className="mt-4 w-full"
     >
       <div className="mb-4">
         <h3 className="text-lg font-semibold text-gray-800 mb-2">
@@ -48,10 +48,11 @@ export const RestaurantRecommendations: React.FC<RestaurantRecommendationsProps>
         </p>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
         {restaurants.map((restaurant, index) => (
           <motion.div
             key={restaurant.id}
+            className="w-full"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
