@@ -86,6 +86,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const viewStoredFeedback = () => {
+    const feedback = JSON.parse(localStorage.getItem('restaurantFeedback') || '[]');
+    console.log('Stored Restaurant Feedback:', feedback);
+    // You can add a modal or separate component to display this data
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
