@@ -67,10 +67,10 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-green-50">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-green-50 w-full">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-orange-100 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
               <div className="bg-gradient-to-r from-orange-500 to-green-500 p-2 rounded-lg">
@@ -111,9 +111,11 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {appState === 'onboarding' && (
+          <div className="max-w-2xl mx-auto">
           <UserOnboarding onUserRegistered={handleUserRegistered} />
+          </div>
         )}
         
         {appState === 'chat' && currentSessionId && (
@@ -125,11 +127,13 @@ function App() {
         )}
         
         {appState === 'history' && (
+          <div className="max-w-6xl mx-auto">
           <ChatHistory 
             onBackToChat={handleBackToChat}
             onViewSession={handleViewHistorySession}
             selectedSession={selectedHistorySession}
           />
+          </div>
         )}
       </main>
     </div>
