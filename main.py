@@ -8,8 +8,12 @@ import json
 import google.generativeai as genai
 import os
 import httpx
+import requests
 import asyncio
+import time
 from dotenv import load_dotenv
+# Dynamic food keywords learned from Qloo entities
+dynamic_food_keywords = set()
 
 load_dotenv()
 
@@ -70,7 +74,9 @@ chat_sessions: Dict[str, ChatSession] = {}
 user_profiles: Dict[str, UserProfile] = {}
 user_preferences: Dict[str, List[UserPreference]] = {}
 
-# Qloooooooooooooo API
+# Qloo API Configuration
+qloo_hackathon_endpoint = "https://hackathon.api.qloo.com"
+qloo_api_key = os.getenv("QLOO_API_KEY")
 class QlooAPIService:
     def __init__(self):
         self.api_key = os.getenv("QLOO_API_KEY")
@@ -78,151 +84,117 @@ class QlooAPIService:
             print("Warning: QLOO_API_KEY not found, using mock data")
             self.api_key = None
         
-        self.base_url = "https://hackathon.api.qloo.com/v2"
+        self.base_url = "https://hackathon.api.qloo.com"
         self.headers = {
             "X-Api-Key": self.api_key,
             "Content-Type": "application/json"
         } if self.api_key else {}
+
+# Initialize Gemini LLM
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+llm = genai.GenerativeModel("gemini-2.0-flash")
+
+headers = {
+    "accept": "application/json",
+    "X-Api-Key": qloo_api_key
+}
+
+def get_type(prompt):
+    system_instruction = (
+        "Analyze the user's message and decide whether we have to recommend a restaurant "
+        "from their old visits (A) or find a new place entirely (B). "
+        "Only respond with A or B, nothing else."
+    )
+    start_time = time.time()
+    response = llm.generate_content([system_instruction, prompt])
+    end_time = time.time()
+
+    print(f"Time taken: {end_time - start_time:.3f} seconds")
+    print("Response from Gemini:")
+    print(response.text)
+    return response.text.strip().upper()
+
+def get_keywords(prompt):
+    system_instruction = (
+        "Identify and list only the most relevant keywords from the user's message that describe their preferences or "
+        "requirements for a restaurant. Exclude any mention of location, generic terms like restaurant, place, food, "
+        "or similar. Respond with a concise, comma-separated list of keywords that capture the user's specific interests, "
+        "needs, or constraints for choosing a restaurant. Do not include any explanations or extra text."
+    )
+    start_time = time.time()
+    response = llm.generate_content([system_instruction, prompt])
+    end_time = time.time()
+
+    print(f"Time taken: {end_time - start_time:.3f} seconds")
+    print("Response from Gemini:")
+    print(response.text)
+    return response.text.strip()
+
+def convert_to_urn(tag):
+    # Convert tag to URN format
+    return tag.replace(":", "%3A").replace(" ", "_")
+
+def get_recommendation(entity, tags = "", operator = "union", take = 5):
+    #tag --> urn:tag:genre:action ---> urn%3Atag%3Agenre%3Aaction
+    #tags are comma separated
+    #operator --> {union or intersection}
+
+    url = f"{qloo_hackathon_endpoint}/recommendations?entity_ids={entity}&type=urn%3Aentity%3Aplace&bias.content_based=0.5&filter.entity_ids={tags}&filter.radius=10&filter.tags=&operator.filter.tags={operator}&page=1&sort_by=affinity&take={take}"
+
+    response = requests.get(url, headers=headers)
+    data = json.loads(response.text)
     
-    async def get_restaurant_recommendations(self, location: str, cuisine_type: str = None, limit: int = 5) -> List[RestaurantRecommendation]:
-        """Get restaurant recommendations from Qloo Insights API"""
-        if not self.api_key:
-            print("No Qloo API key loaded! Using mock data instead.")
-            return self._get_mock_restaurants(location, limit)
-
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.base_url}/insights"
-                params = {
-                    "filter.type": "urn:entity:place",
-                    "filter.location.query": location,
-                    "limit": limit
-                }
-
-                # using already defined example entity IDs(we can use actual IDs from Qloo API)
-                cuisine_entity_map = {
-                    "italian": "FCE8B172-4795-43E4-B222-3B550DC05FD9",
-                    "pizza": "FCE8B172-4795-43E4-B222-3B550DC05FD9"
-                }
-                if cuisine_type and cuisine_type.lower() in cuisine_entity_map:
-                    params["signal.interests.entities"] = cuisine_entity_map[cuisine_type.lower()]
-
-                
-                safe_headers = {"Authorization": f"{self.api_key[:6]}***", "Content-Type": "application/json"}
-                print(f"Making Qloo API request to: {url}")
-                print(f"Params: {params}")
-                print(f"Headers: {safe_headers}")
-
-                response = await client.get(url, headers=self.headers, params=params,timeout =30.0) #this timeout is required, min of 15-20 s it is taking to generate response from qloo api
-                print(f"Qloo API Response Status: {response.status_code}")
-                print(f"Qloo API Response: {response.text[:500]}...")
-
-                response.raise_for_status()
-                data = response.json()
-
-                restaurants = []
-                if "results" in data and "entities" in data["results"]:
-                    for item in data["results"]["entities"][:limit]:
-                        restaurant = RestaurantRecommendation(
-                            id=item.get("entity_id", str(uuid.uuid4())),
-                            name=item.get("name", "Unknown Restaurant"),
-                            address=item.get("properties", {}).get("address"),
-                            phone=item.get("properties", {}).get("phone"),
-                            website=item.get("properties", {}).get("website"),
-                            description=item.get("properties", {}).get("description"),
-                            rating=item.get("properties", {}).get("business_rating"),
-                            cuisine_type=cuisine_type
-                        )
-                        restaurants.append(restaurant)
-
-                print(f"Successfully parsed {len(restaurants)} restaurants")
-                return restaurants
-
-        except Exception as e:
-            print(f"Error fetching restaurant recommendations: {e}")
-            import traceback
-            traceback.print_exc()
-            return self._get_mock_restaurants(location, limit)
+    with open("response_data.txt", "w") as file:
+        json.dump(data, file, indent=2)
+    print("Data saved to response_data.txt")
     
-    async def get_restaurant_details(self, restaurant_id: str) -> Dict[str, Any]:
-        """Get detailed information about a specific restaurant -> when user clicks "MORE INFO" button"""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.base_url}/insights/{restaurant_id}"
-                response = await client.get(url, headers=self.headers,timeout=30.0)
-                response.raise_for_status()
-                
-                return response.json()
-                
-        except Exception as e:
-            print(f"Error fetching restaurant details: {e}")
-            return {"error": "Could not fetch restaurant details"}
+    return data
+
+def get_insights(location, tags = "", operator="union", take = 5):
+
+    url = f"{qloo_hackathon_endpoint}/v2/insights?filter.type=urn%3Aentity%3Aplace&filter.location.query={location}&filter.tags={tags}&operator.filter.tags={operator}&take={take}"
+
+    response = requests.get(url, headers=headers)
+    data = json.loads(response.text)
+        
+    with open("response_data.txt", "w") as file:
+        json.dump(data, file, indent=2)
+    print("Data saved to response_data.txt")
     
-    def _get_mock_restaurants(self, location: str, limit: int) -> List[RestaurantRecommendation]:
-        """Fallback mock data when API fails"""
-        mock_restaurants = [
-            RestaurantRecommendation(
-                id="mock-1",
-                name=f"Bella Vista Restaurant ({location})",
-                image_url="https://images.pexels.com/photos/262978/pexels-photo-262978.jpeg",
-                rating=4.5,
-                address=f"123 Main St, {location}",
-                phone="+1-555-0123",
-                website="https://bellavista.com",
-                cuisine_type="Italian",
-                price_range="$$",
-                description="Authentic Italian cuisine with fresh ingredients"
-            ),
-            RestaurantRecommendation(
-                id="mock-2",
-                name=f"Sakura Sushi ({location})",
-                image_url="https://images.pexels.com/photos/357756/pexels-photo-357756.jpeg",
-                rating=4.7,
-                address=f"456 Oak Ave, {location}",
-                phone="+1-555-0456",
-                website="https://sakurasushi.com",
-                cuisine_type="Japanese",
-                price_range="$$$",
-                description="Fresh sushi and traditional Japanese dishes"
-            ),
-            RestaurantRecommendation(
-                id="mock-3",
-                name=f"The Local Bistro ({location})",
-                image_url="https://images.pexels.com/photos/1581384/pexels-photo-1581384.jpeg",
-                rating=4.3,
-                address=f"789 Pine St, {location}",
-                phone="+1-555-0789",
-                website="https://localbistro.com",
-                cuisine_type="American",
-                price_range="$$",
-                description="Farm-to-table American cuisine with local ingredients"
-            ),
-            RestaurantRecommendation(
-                id="mock-4",
-                name=f"Spice Garden ({location})",
-                image_url="https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg",
-                rating=4.6,
-                address=f"321 Elm St, {location}",
-                phone="+1-555-0321",
-                website="https://spicegarden.com",
-                cuisine_type="Indian",
-                price_range="$$",
-                description="Authentic Indian spices and traditional recipes"
-            ),
-            RestaurantRecommendation(
-                id="mock-5",
-                name=f"Café Parisien ({location})",
-                image_url="https://images.pexels.com/photos/1307698/pexels-photo-1307698.jpeg",
-                rating=4.4,
-                address=f"654 Maple Ave, {location}",
-                phone="+1-555-0654",
-                website="https://cafeparisien.com",
-                cuisine_type="French",
-                price_range="$$$",
-                description="Classic French café with pastries and coffee"
-            )
-        ]
-        return mock_restaurants[:limit]
+    return data
+
+def get_tags(query, take = 10):
+
+    url = f"{qloo_hackathon_endpoint}/v2/tags?feature.typo_tolerance=true&filter.query={query}&take={take}"
+
+    response = requests.get(url, headers=headers)
+    data = json.loads(response.text)
+
+    return data
+
+def update_dynamic_food_keywords(qloo_entities):
+    global dynamic_food_keywords
+    for entity in qloo_entities:
+        props = entity.get("properties", {})
+        
+        # Add specialty dishes
+        for dish in props.get("specialty_dishes", []):
+            name = dish.get("name")
+            if name:
+                dynamic_food_keywords.add(name.lower())
+        
+        # Add keyword tags
+        for kw in props.get("keywords", []):
+            name = kw.get("name")
+            if name:
+                dynamic_food_keywords.add(name.lower())
+        
+        # Add general tags (like pizza, sushi, etc.)
+        for tag in entity.get("tags", []):
+            name = tag.get("name")
+            if name:
+                dynamic_food_keywords.add(name.lower())
+
 
 # Gemini LLM
 class GeminiRestaurantService:
@@ -233,14 +205,7 @@ class GeminiRestaurantService:
         
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        
-        try:
-            self.qloo_service = QlooAPIService()
-        except ValueError:
-            print("Warning: Qloo API not configured, using mock data")
-            self.qloo_service = None
-        
+                
         # Configuring prompt for restaurant specialization
         self.system_prompt = """You are FoodieBot, an expert restaurant and food recommendation assistant. Your expertise includes:
 
@@ -278,43 +243,101 @@ Remember: You're here to make food discovery exciting and help users find their 
     async def generate_response(self, message: str, user_profile: UserProfile, session_id: str) -> tuple[str, List[RestaurantRecommendation]]:
         try:
             
-            recommendation_keywords = ['recommend', 'suggest', 'find', 'restaurant', 'food', 'eat', 'dining', 'cuisine']
-            should_get_recommendations = any(keyword in message.lower() for keyword in recommendation_keywords)
+            recommendation_keywords = ['recommend', 'suggest', 'find', 'restaurant', 'food', 'eat', 'dining', 'cuisine','pizza']
+            all_keywords = recommendation_keywords + list(dynamic_food_keywords)
+            should_get_recommendations = any(keyword in message.lower() for keyword in all_keywords)
+            
+            keywords = get_keywords(message)
+            print(f"Extracted keywords: {keywords}")
+
+            # Fallback: if extracted keywords look like food, enable recommendations
+            if not should_get_recommendations and keywords and keywords.lower() != "none":
+                should_get_recommendations = True
             
             print(f"User message: {message}")
             print(f"Should get recommendations: {should_get_recommendations}")
             
             restaurants = []
-            if should_get_recommendations and self.qloo_service:
-                # Extracting particular cuisine
-                cuisine_type = None
-                cuisine_keywords = {
-                    'italian': 'italian',
-                    'chinese': 'chinese',
-                    'japanese': 'japanese',
-                    'indian': 'indian',
-                    'mexican': 'mexican',
-                    'french': 'french',
-                    'thai': 'thai',
-                    'american': 'american'
-                }
+            if should_get_recommendations and qloo_api_key:
+                try:
+                    # Extract keywords using the get_keywords function
+                    keywords = get_keywords(message)
+                    print(f"Extracted keywords: {keywords}")
+                    
+                    if keywords and keywords.lower() != "none":
+                        # Get tags from Qloo API
+                        tags_data = get_tags(keywords, take=10)
+                        print(f"Tags data: {tags_data}")
+                        
+                        # Extract tag URNs from the response
+                        tag_urns = []
+                        if "results" in tags_data and "tags" in tags_data["results"]:
+                            for tag in tags_data["results"]["tags"][:5]:  # Use top 5 tags
+                                if "id" in tag:
+                                    tag_urns.append(tag["id"])
+                        
+                        print(f"Tag URNs: {tag_urns}")
+                        
+                        if tag_urns:
+                            # Convert tags to proper format and join them
+                            converted_tags = [convert_to_urn(tag) for tag in tag_urns]
+                            tags_param = ",".join(converted_tags)
+                            print(f"Converted tags: {tags_param}")
+                            
+                            # Get insights with tag filtering
+                            insights_data = get_insights(user_profile.location, tags=tags_param, operator="union", take=6)
+                        else:
+                            # Fallback to general location-based search
+                            insights_data = get_insights(user_profile.location, take=6)
+                    else:
+                        # No specific keywords, general location search
+                        insights_data = get_insights(user_profile.location, take=6)
+                    
+                    print(f"Insights data: {insights_data}")
+                    
+                    # Parse the insights response
+                    if "results" in insights_data and "entities" in insights_data["results"]:
+                        update_dynamic_food_keywords(insights_data["results"]["entities"])
+                        for item in insights_data["results"]["entities"]:
+                            # Define properties
+                            properties = item.get("properties", {})
+                            image_url = None
+                            images = properties.get("images", [])
+                            if images and isinstance(images, list):
+                                image_url = images[0].get("url")
+                            address = properties.get("address")
+                            website = properties.get("website")
+                            phone = properties.get("phone")
+                            rating = properties.get("business_rating")
+                            description = properties.get("description", "Great dining experience")
+
+                            
+                            # Extract cuisine type
+                            cuisine_type = None
+                            if "cuisine" in item and "name" in item["cuisine"]:
+                                cuisine_type = item["cuisine"]["name"]
+                            
+                            restaurant = RestaurantRecommendation(
+                                id=item.get("id", str(uuid.uuid4())),
+                                name=item.get("name", "Unknown Restaurant"),
+                                image_url=image_url,
+                                rating=rating,
+                                address=address,
+                                phone=phone,
+                                website=website,
+                                cuisine_type=cuisine_type,
+                                price_range=f"{properties.get('price_range', {}).get('from', '?')}-{properties.get('price_range', {}).get('to', '?')} {properties.get('price_range', {}).get('currency', '')}" if 'price_range' in properties else "$$",
+                                description=item.get("description", "Great dining experience")
+                            )
+                            restaurants.append(restaurant)
+                    
+                    print(f"Successfully parsed {len(restaurants)} restaurants")
                 
-                for keyword, cuisine in cuisine_keywords.items():
-                    if keyword in message.lower():
-                        cuisine_type = cuisine
-                        break
-                
-                print(f"Detected cuisine type: {cuisine_type}")
-                print(f"User location: {user_profile.location}")
-                
-                
-                restaurants = await self.qloo_service.get_restaurant_recommendations(
-                    location=user_profile.location,
-                    cuisine_type=cuisine_type,
-                    limit=5
-                )
-                
-                print(f"Got {len(restaurants)} restaurants from Qloo service")
+                except Exception as e:
+                    print(f"Error with Qloo API: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    restaurants = []
             
             
             restaurant_context = ""
@@ -501,11 +524,12 @@ async def save_restaurant_preference(preference: UserPreference):
 
 @app.get("/api/restaurant-details/{restaurant_id}")
 async def get_restaurant_details(restaurant_id: str):
-    if not qloo_service:
+    if not qloo_api_key:
         return {"error": "Qloo API service not available"}
     
     try:
-        details = await qloo_service.get_restaurant_details(restaurant_id)
+        # Use the get_recommendation function to get details
+        details = get_recommendation(restaurant_id, take=1)
         return details
     except Exception as e:
         return {"error": f"Failed to fetch restaurant details: {str(e)}"}
@@ -541,24 +565,15 @@ async def health_check():
 @app.get("/api/test-qloo")
 async def test_qloo_api():
     """Test endpoint to debug Qloo API integration"""
-    if not qloo_service:
+    if not qloo_api_key:
         return {"error": "Qloo service not available"}
     
     try:
-        restaurants = await qloo_service.get_restaurant_recommendations("New York", limit=3)
+        # Test the get_insights function
+        test_data = get_insights("New York", take=3)
         return {
             "status": "success",
-            "restaurant_count": len(restaurants),
-            "restaurants": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "image_url": r.image_url,
-                    "rating": r.rating,
-                    "address": r.address,
-                    "cuisine_type": r.cuisine_type
-                } for r in restaurants
-            ]
+            "data": test_data
         }
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
@@ -566,3 +581,4 @@ async def test_qloo_api():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
