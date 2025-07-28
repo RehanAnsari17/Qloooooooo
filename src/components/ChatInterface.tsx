@@ -80,7 +80,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       await axios.post(`http://localhost:8000/api/end-chat/${sessionId}`);
       setIsChatEnded(true);
-      loadChatSession(); // Reload to get the final message
+      loadChatSession();
     } catch (error) {
       console.error('Error ending chat:', error);
     }
@@ -103,7 +103,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-orange-100">
+    <div className="w-full max-w-7xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-orange-100">
       {/* Chat Header */}
       <div className="bg-gradient-to-r from-orange-500 to-green-500 p-6 text-white">
         <div className="flex justify-between items-center">
@@ -133,7 +133,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Messages Container */}
-      <div className="h-96 overflow-y-auto p-6 space-y-4 bg-gray-50">
+      <div className="h-[600px] overflow-y-auto p-6 space-y-4 bg-gray-50">
         <AnimatePresence>
           {messages.map((message) => (
             <motion.div
@@ -141,11 +141,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
-              className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col space-y-2`}
             >
-              <div className={`flex max-w-xs lg:max-w-md space-x-3 ${
-                message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-              }`}>
+              <div
+                className={`rounded-2xl px-4 py-3 break-words whitespace-pre-wrap ${
+                  message.sender === 'user'
+                    ? 'bg-orange-500 text-white max-w-lg md:max-w-xl'
+                    : 'bg-white text-gray-800 border border-gray-200 max-w-lg md:max-w-2xl'
+                }`}
+              >
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                   message.sender === 'user' 
                     ? 'bg-orange-500' 
@@ -157,25 +161,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     <Bot className="w-4 h-4 text-white" />
                   )}
                 </div>
-                <div className={`rounded-2xl px-4 py-3 ${
-                  message.sender === 'user'
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-white text-gray-800 border border-gray-200'
-                }`}>
+                <div
+                  className={`inline-block rounded-2xl px-4 py-3 text-sm leading-relaxed break-words whitespace-pre-wrap max-w-xs md:max-w-md lg:max-w-lg ${
+                    message.sender === 'user'
+                      ? 'bg-orange-500 text-white self-end'
+                      : 'bg-white text-gray-800 border border-gray-200 self-start'
+                  }`}
+                >
                   <div className="text-sm leading-relaxed">
                     {formatMessage(message.content)}
                   </div>
-                  
-                  {/* Restaurant Recommendations */}
-                  {message.sender === 'bot' && message.restaurants && (
-                    <div className="mt-4">
-                      <RestaurantRecommendations 
-                        restaurants={message.restaurants}
-                        sessionId={sessionId}
-                      />
-                    </div>
-                  )}
-                  
                   <div className={`text-xs mt-2 ${
                     message.sender === 'user' ? 'text-orange-100' : 'text-gray-500'
                   }`}>
@@ -186,6 +181,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Restaurant Recommendations */}
+              {message.sender === 'bot' && message.restaurants && (
+                <div className="mt-4 w-full">
+                  <RestaurantRecommendations 
+                    restaurants={message.restaurants}
+                    sessionId={sessionId}
+                  />
+                </div>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
