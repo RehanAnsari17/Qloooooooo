@@ -12,7 +12,6 @@ import requests
 import asyncio
 import time
 from dotenv import load_dotenv
-# Dynamic food keywords learned from Qloo entities
 dynamic_food_keywords = set()
 
 load_dotenv()
@@ -61,6 +60,7 @@ class UserPreference(BaseModel):
     restaurant_id: str
     preference: str 
     session_id: str
+    feedback: Optional[str] = None
 class ChatSession(BaseModel):
     id: str
     user_profile: UserProfile
@@ -318,7 +318,7 @@ Remember: You're here to make food discovery exciting and help users find their 
                                 cuisine_type = item["cuisine"]["name"]
                             
                             restaurant = RestaurantRecommendation(
-                                id=item.get("id", str(uuid.uuid4())),
+                                id=item.get("entity_id", str(uuid.uuid4())),
                                 name=item.get("name", "Unknown Restaurant"),
                                 image_url=image_url,
                                 rating=rating,
@@ -520,19 +520,51 @@ async def save_restaurant_preference(preference: UserPreference):
     
     user_preferences[session_id].append(preference)
     
-    return {"message": "Preference saved successfully"}
+    return {"message": "Preference and feedback saved successfully"}
+
+@app.get("/api/user-feedback/{session_id}")
+async def get_user_feedback(session_id: str):
+    if session_id not in user_preferences:
+        return {"feedback": []}
+    
+    feedback_data = []
+    for pref in user_preferences[session_id]:
+        if pref.feedback:
+            feedback_data.append({
+                "restaurant_id": pref.restaurant_id,
+                "preference": pref.preference,
+                "feedback": pref.feedback,
+                "timestamp": datetime.now().isoformat()
+            })
+    
+    return {"feedback": feedback_data}
+
+@app.get("/api/user-feedback/{session_id}")
+async def get_user_feedback(session_id: str):
+    if session_id in user_preferences:
+        return {"feedback": user_preferences[session_id]}
+    return {"feedback": []}
+
 
 @app.get("/api/restaurant-details/{restaurant_id}")
 async def get_restaurant_details(restaurant_id: str):
-    if not qloo_api_key:
-        return {"error": "Qloo API service not available"}
+        if not qloo_api_key:
+            return {"error": "Qloo API service not available"}
+        
+        try:
+            # Get full details using insights endpoint
+            url = f"{qloo_hackathon_endpoint}/v2/insights?filter.type=urn%3Aentity%3Aplace&filter.entity_ids={restaurant_id}&take=1"
+            response = requests.get(url, headers=headers)
+            data = json.loads(response.text)
+
+            with open("response_data.txt", "w") as file:
+                json.dump(data, file, indent=2)
+
+            return data
+        except Exception as e:
+            return {"error": f"Failed to fetch restaurant details: {str(e)}"}
+
     
-    try:
-        # Use the get_recommendation function to get details
-        details = get_recommendation(restaurant_id, take=1)
-        return details
-    except Exception as e:
-        return {"error": f"Failed to fetch restaurant details: {str(e)}"}
 
 @app.get("/api/chat-history")
 async def get_chat_history():
