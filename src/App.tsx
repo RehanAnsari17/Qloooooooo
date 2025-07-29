@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { UserOnboarding } from './components/UserOnboarding';
+import { UserAuthentication } from './components/UserAuthentication';
 import { ChatInterface } from './components/ChatInterface';
 import { ChatHistory } from './components/ChatHistory';
 import { MessageCircle, History, User } from 'lucide-react';
+import { authService, UserData } from './services/authService';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './config/firebase';
 
 export interface UserProfile {
   name: string;
@@ -32,11 +35,55 @@ type AppState = 'onboarding' | 'chat' | 'history';
 function App() {
   const [appState, setAppState] = useState<AppState>('onboarding');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [selectedHistorySession, setSelectedHistorySession] = useState<ChatSession | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-  const handleUserRegistered = (profile: UserProfile, sessionId: string) => {
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userData = await authService.getCurrentUserData();
+          if (userData) {
+            setUserData(userData);
+            setUserProfile({
+              name: userData.name,
+              age: userData.age,
+              location: userData.location
+            });
+            // Auto-create session for returning user
+            const sessionResponse = await fetch('http://localhost:8000/api/register-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: userData.name,
+                age: userData.age,
+                location: userData.location
+              })
+            });
+            const sessionData = await sessionResponse.json();
+            setCurrentSessionId(sessionData.session_id);
+            setAppState('chat');
+          }
+        } catch (error) {
+          console.error('Error loading user data:', error);
+        }
+      } else {
+        setUserData(null);
+        setUserProfile(null);
+        setCurrentSessionId(null);
+        setAppState('onboarding');
+      }
+      setIsCheckingAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleUserAuthenticated = (profile: UserProfile, sessionId: string, userData: UserData) => {
     setUserProfile(profile);
+    setUserData(userData);
     setCurrentSessionId(sessionId);
     setAppState('chat');
   };
@@ -65,6 +112,29 @@ function App() {
   const handleViewHistorySession = (session: ChatSession) => {
     setSelectedHistorySession(session);
   };
+
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+      setUserProfile(null);
+      setUserData(null);
+      setCurrentSessionId(null);
+      setAppState('onboarding');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-green-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-500 border-t-transparent mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-green-50 w-full">
@@ -99,6 +169,12 @@ function App() {
                   <span>{userProfile.name}</span>
                 </button>
                 <button
+                  onClick={handleLogout}
+                  className="text-gray-700 hover:bg-orange-100 px-3 py-2 rounded-lg transition-colors text-sm"
+                >
+                  Logout
+                </button>
+                <button
                   onClick={handleStartNewChat}
                   className="bg-gradient-to-r from-orange-500 to-green-500 text-white px-4 py-2 rounded-lg hover:from-orange-600 hover:to-green-600 transition-all duration-200"
                 >
@@ -114,7 +190,7 @@ function App() {
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {appState === 'onboarding' && (
           <div className="max-w-2xl mx-auto">
-          <UserOnboarding onUserRegistered={handleUserRegistered} />
+          <UserAuthentication onUserAuthenticated={handleUserAuthenticated} />
           </div>
         )}
         
