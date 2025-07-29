@@ -12,9 +12,30 @@ import requests
 import asyncio
 import time
 from dotenv import load_dotenv
+# import pyrebase
 dynamic_food_keywords = set()
 
 load_dotenv()
+
+# Firebase configuration
+firebase_config = {
+    "apiKey": os.getenv("FIREBASE_API_KEY"),
+    "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN"),
+    "projectId": os.getenv("FIREBASE_PROJECT_ID"),
+    "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
+    "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID"),
+    "appId": os.getenv("FIREBASE_APP_ID"),
+    "databaseURL": ""  # Not needed for Firestore
+}
+
+# Initialize Firebase (optional - for server-side operations)
+# try:
+#     firebase = pyrebase.initialize_app(firebase_config)
+#     firebase_auth = firebase.auth()
+#     print("Firebase initialized successfully")
+# except Exception as e:
+#     print(f"Firebase initialization failed: {e}")
+#     firebase_auth = None
 
 app = FastAPI(title="Restaurant Chatbot API", version="1.0.0")
 
@@ -150,18 +171,37 @@ def get_recommendation(entity, tags = "", operator = "union", take = 5):
     
     return data
 
-def get_insights(location, tags = "", operator="union", take = 5):
+def get_insights(location, tags="", operator="union", take=5, radius_list=[25, 50]):
+    """
+    Get restaurant insights with dynamic radius search.
+    Will try multiple radii (e.g., 25km, 50km, 100km) until results are found.
+    """
 
-    url = f"{qloo_hackathon_endpoint}/v2/insights?filter.type=urn%3Aentity%3Aplace&filter.location.query={location}&filter.tags={tags}&operator.filter.tags={operator}&take={take}"
+    for radius in radius_list:
+        url = (
+            f"{qloo_hackathon_endpoint}/v2/insights?"
+            f"filter.type=urn%3Aentity%3Aplace"
+            f"&filter.location.query={location}"
+            f"&filter.radius={radius}"
+            f"&filter.tags={tags}"
+            f"&operator.filter.tags={operator}"
+            f"&take={take}"
+        )
+        response = requests.get(url, headers=headers)
+        data = json.loads(response.text)
 
-    response = requests.get(url, headers=headers)
-    data = json.loads(response.text)
-        
-    with open("response_data.txt", "w") as file:
-        json.dump(data, file, indent=2)
-    print("Data saved to response_data.txt")
-    
+        # Save last response for debugging
+        with open("response_data.txt", "w") as file:
+            json.dump(data, file, indent=2)
+        print(f"Data saved to response_data.txt (radius={radius})")
+
+        # Return data if results found
+        if data.get("results", {}).get("entities"):
+            return data
+
+    # Return last attempt (even if empty)
     return data
+
 
 def get_tags(query, take = 10):
 
@@ -272,28 +312,46 @@ Remember: You're here to make food discovery exciting and help users find their 
                         # Extract tag URNs from the response
                         tag_urns = []
                         if "results" in tags_data and "tags" in tags_data["results"]:
-                            for tag in tags_data["results"]["tags"][:5]:  # Use top 5 tags
-                                if "id" in tag:
-                                    tag_urns.append(tag["id"])
-                        
-                        print(f"Tag URNs: {tag_urns}")
-                        
+                            for tag in tags_data["results"]["tags"]:
+                                #if "id" in tag:
+                                tag_id = tag.get("id", "")
+                                # Keep only food-related tags
+                                if any(keyword in tag_id for keyword in [":specialty_dish:", ":cuisine:", ":category:place:"]):
+                                    tag_urns.append(tag_id)
+
+                        # Limit to top 5 relevant tags
+                        tag_urns = tag_urns[:5]
+
+                        print(f"Filtered Tag URNs: {tag_urns}")
+
                         if tag_urns:
                             # Convert tags to proper format and join them
                             converted_tags = [convert_to_urn(tag) for tag in tag_urns]
                             tags_param = ",".join(converted_tags)
                             print(f"Converted tags: {tags_param}")
+
                             
                             # Get insights with tag filtering
                             insights_data = get_insights(user_profile.location, tags=tags_param, operator="union", take=6)
+                            # Fallback 1: if no results, retry with cuisine/category-only tags
+                            if not insights_data.get("results", {}).get("entities"):
+                                print("No results with specialty dish tags, retrying with cuisine/category-only tags...")
+                                cuisine_tags = [t for t in tag_urns if any(k in t for k in [":cuisine:", ":category:place:"])]
+                                if cuisine_tags:
+                                    cuisine_tags_param = ",".join([convert_to_urn(t) for t in cuisine_tags])
+                                    insights_data = get_insights(user_profile.location, tags=cuisine_tags_param, operator="union", take=6)
+
+                            # Fallback 2: if still no results, retry with location-only search
+                            if not insights_data.get("results", {}).get("entities"):
+                                print("No results with tags, retrying with location-only search...")
+                                insights_data = get_insights(user_profile.location, take=6)
                         else:
                             # Fallback to general location-based search
                             insights_data = get_insights(user_profile.location, take=6)
-                    else:
-                        # No specific keywords, general location search
-                        insights_data = get_insights(user_profile.location, take=6)
-                    
-                    print(f"Insights data: {insights_data}")
+                        
+
+                        print(f"Insights data: {insights_data}")
+
                     
                     # Parse the insights response
                     if "results" in insights_data and "entities" in insights_data["results"]:
@@ -613,4 +671,3 @@ async def test_qloo_api():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
