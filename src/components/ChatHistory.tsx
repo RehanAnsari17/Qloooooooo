@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { ChatSession } from '../App';
 import { ArrowLeft, Calendar, MessageSquare, User, Bot, Clock, Eye } from 'lucide-react';
+import { authService, UserData } from '../services/authService';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 
 interface ChatHistoryProps {
+  userData: UserData;
   onBackToChat: () => void;
   onViewSession: (session: ChatSession) => void;
   selectedSession: ChatSession | null;
@@ -21,6 +23,7 @@ interface HistorySession {
 }
 
 export const ChatHistory: React.FC<ChatHistoryProps> = ({ 
+  userData,
   onBackToChat, 
   onViewSession, 
   selectedSession 
@@ -34,8 +37,29 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   const loadChatHistory = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/chat-history');
-      setHistorySessions(response.data.sessions);
+      // Load from Firebase first
+      const firebaseSessions = await authService.getUserChatSessions(userData.uid);
+      
+      // Convert Firebase sessions to display format
+      const formattedSessions = firebaseSessions.map(session => ({
+        id: session.id,
+        user_name: session.userProfile.name,
+        created_at: session.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        ended_at: session.endedAt?.toDate?.()?.toISOString(),
+        message_count: session.messages.length,
+        is_active: session.isActive,
+        preview: session.messages.length > 1 
+          ? session.messages[1].content.substring(0, 100) + "..." 
+          : "New conversation"
+      }));
+      
+      setHistorySessions(formattedSessions);
+      
+      // Fallback to backend if no Firebase data
+      if (formattedSessions.length === 0) {
+        const response = await axios.get('http://localhost:8000/api/chat-history');
+        setHistorySessions(response.data.sessions);
+      }
     } catch (error) {
       console.error('Error loading chat history:', error);
     } finally {
@@ -45,8 +69,32 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   const handleViewSession = async (sessionId: string) => {
     try {
-      const response = await axios.get(`http://localhost:8000/api/chat-session/${sessionId}`);
-      onViewSession(response.data);
+      // Try to load from Firebase first
+      const firebaseSessions = await authService.getUserChatSessions(userData.uid);
+      const firebaseSession = firebaseSessions.find(s => s.id === sessionId);
+      
+      if (firebaseSession) {
+        // Convert Firebase session to expected format
+        const convertedSession = {
+          id: firebaseSession.id,
+          user_profile: firebaseSession.userProfile,
+          messages: firebaseSession.messages.map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            sender: msg.sender,
+            timestamp: msg.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+            restaurants: msg.restaurants
+          })),
+          created_at: firebaseSession.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          ended_at: firebaseSession.endedAt?.toDate?.()?.toISOString(),
+          is_active: firebaseSession.isActive
+        };
+        onViewSession(convertedSession);
+      } else {
+        // Fallback to backend
+        const response = await axios.get(`http://localhost:8000/api/chat-session/${sessionId}`);
+        onViewSession(response.data);
+      }
     } catch (error) {
       console.error('Error loading session:', error);
     }
