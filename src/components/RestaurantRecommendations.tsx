@@ -1,6 +1,7 @@
 import React from 'react';
 import { RestaurantCard } from './RestaurantCard';
 import { motion } from 'framer-motion';
+import type { UserData } from '../services/authService';
 
 interface Restaurant {
   id: string;
@@ -18,11 +19,13 @@ interface Restaurant {
 interface RestaurantRecommendationsProps {
   restaurants: Restaurant[];
   sessionId: string;
+  userData: UserData;
 }
 
 export const RestaurantRecommendations: React.FC<RestaurantRecommendationsProps> = ({ 
   restaurants, 
-  sessionId 
+  sessionId,
+  userData
 }) => {
   const handlePreferenceSaved = (restaurantId: string, preference: 'like' | 'dislike') => {
     console.log(`User ${preference}d restaurant ${restaurantId}`);
@@ -60,6 +63,7 @@ export const RestaurantRecommendations: React.FC<RestaurantRecommendationsProps>
             <RestaurantCard
               restaurant={restaurant}
               sessionId={sessionId}
+              userData={userData}
               onPreferenceSaved={handlePreferenceSaved}
             />
           </motion.div>
