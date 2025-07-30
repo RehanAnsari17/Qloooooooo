@@ -79,21 +79,40 @@ export const UserAuthentication: React.FC<UserAuthenticationProps> = ({ onUserAu
       
       if (authMode === 'login') {
         userData = await authService.login(formData.email, formData.password);
-        // For login, use existing location from database
+        
+        console.log('Login successful, userData:', userData);
+        
+        // For login, use current location from database
         const profile: UserProfile = {
           name: userData.name,
           age: userData.age,
-          location: userData.location
+          location: userData.currentLocation
         };
         
-        // Create session and proceed
+        console.log('Creating session with profile:', profile);
+        
+        // Create session with simple profile format
+        const simpleProfile = {
+          name: profile.name,
+          age: profile.age,
+          location: profile.location
+        };
+        
         const sessionResponse = await fetch('http://localhost:8000/api/register-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(profile)
+          body: JSON.stringify(simpleProfile)
         });
         
+        if (!sessionResponse.ok) {
+          const errorText = await sessionResponse.text();
+          console.error('Session creation failed:', errorText);
+          throw new Error(`Failed to create session: ${sessionResponse.status}`);
+        }
+        
         const sessionData = await sessionResponse.json();
+        console.log('Session created:', sessionData);
+        
         onUserAuthenticated(profile, sessionData.session_id, userData);
         
       } else {
@@ -103,7 +122,8 @@ export const UserAuthentication: React.FC<UserAuthenticationProps> = ({ onUserAu
           email: formData.email,
           name: formData.name,
           age: formData.age,
-          location: '',
+          defaultLocation: '',
+          currentLocation: '',
           createdAt: ''
         });
         setShowLocationModal(true);
@@ -121,6 +141,8 @@ export const UserAuthentication: React.FC<UserAuthenticationProps> = ({ onUserAu
     setIsLoading(true);
     
     try {
+      console.log('Registering user with location:', locationString);
+      
       // Register user with location
       const userData = await authService.register(
         formData.email,
@@ -130,11 +152,15 @@ export const UserAuthentication: React.FC<UserAuthenticationProps> = ({ onUserAu
         locationString
       );
       
+      console.log('Registration successful, userData:', userData);
+      
       const profile: UserProfile = {
         name: userData.name,
         age: userData.age,
-        location: userData.location
+        location: userData.currentLocation || userData.defaultLocation
       };
+      
+      console.log('Creating session with profile:', profile);
       
       // Create session
       const sessionResponse = await fetch('http://localhost:8000/api/register-user', {
@@ -143,10 +169,19 @@ export const UserAuthentication: React.FC<UserAuthenticationProps> = ({ onUserAu
         body: JSON.stringify(profile)
       });
       
+      if (!sessionResponse.ok) {
+        const errorText = await sessionResponse.text();
+        console.error('Session creation failed:', errorText);
+        throw new Error(`Failed to create session: ${sessionResponse.status}`);
+      }
+      
       const sessionData = await sessionResponse.json();
+      console.log('Session created:', sessionData);
+      
       onUserAuthenticated(profile, sessionData.session_id, userData);
       
     } catch (error: any) {
+      console.error('Location submit error:', error);
       setErrors({ general: error.message });
       setShowLocationModal(false);
     } finally {
