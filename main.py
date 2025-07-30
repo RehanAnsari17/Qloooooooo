@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 import uuid
 import json
@@ -12,7 +12,7 @@ import requests
 import asyncio
 import time
 from dotenv import load_dotenv
-# import pyrebase
+
 dynamic_food_keywords = set()
 
 load_dotenv()
@@ -28,14 +28,6 @@ firebase_config = {
     "databaseURL": ""  # Not needed for Firestore
 }
 
-# Initialize Firebase (optional - for server-side operations)
-# try:
-#     firebase = pyrebase.initialize_app(firebase_config)
-#     firebase_auth = firebase.auth()
-#     print("Firebase initialized successfully")
-# except Exception as e:
-#     print(f"Firebase initialization failed: {e}")
-#     firebase_auth = None
 
 app = FastAPI(title="Restaurant Chatbot API", version="1.0.0")
 
@@ -52,6 +44,16 @@ class UserProfile(BaseModel):
     name: str
     age: int
     location: str
+
+# Enhanced user profile for Firebase integration
+class EnhancedUserProfile(BaseModel):
+    name: str
+    age: int
+    location: str
+    email: Optional[str] = None
+    uid: Optional[str] = None
+    defaultLocation: Optional[str] = None
+    currentLocation: Optional[str] = None
 
 class ChatMessage(BaseModel):
     message: str
@@ -409,11 +411,11 @@ Remember: You're here to make food discovery exciting and help users find their 
 USER PROFILE:
 - Name: {user_profile.name}
 - Age: {user_profile.age}
-- Location: {user_profile.location}
+- Current Location: {user_profile.location}
 
 USER MESSAGE: {message}{restaurant_context}
 
-Please provide a helpful, personalized response about restaurants, food, or dining based on their profile and message. If restaurants were found, mention that you're showing them below and encourage the user to use the like/dislike buttons to help improve future recommendations."""
+Please provide a helpful, personalized response about restaurants, food, or dining based on their current location ({user_profile.location}) and message. If restaurants were found, mention that you're showing them below and encourage the user to use the like/dislike buttons to help improve future recommendations. Always use their current location for context."""
 
             
             full_prompt = f"{self.system_prompt}\n\n{user_context}"
@@ -450,29 +452,63 @@ except ValueError as e:
     print(f"Warning: {e}")
     qloo_service = None
 @app.post("/api/register-user")
-async def register_user(user_profile: UserProfile):
-    user_id = str(uuid.uuid4())
-    user_profiles[user_id] = user_profile
+async def register_user(user_profile: Union[UserProfile, EnhancedUserProfile]):
+    try:
+        print(f"Received user profile data: {user_profile}")
+        
+        # Handle both old and new user profile formats
+        if hasattr(user_profile, 'currentLocation') and user_profile.currentLocation:
+            # New Firebase format
+            location = user_profile.currentLocation
+            name = user_profile.name
+            age = user_profile.age
+        else:
+            # Old format
+            print("Using old format")
+            location = user_profile.location
+            name = user_profile.name
+            age = user_profile.age
+        
+        # Create standardized profile for internal use
+        standardized_profile = UserProfile(
+            name=name,
+            age=age,
+            location=location
+        )
+        
+        print(f"Standardized profile: {standardized_profile}")
+        
+        user_id = str(uuid.uuid4())
+        user_profiles[user_id] = standardized_profile
+        
+        # Inital chat session creation
+        session_id = str(uuid.uuid4())
+        initial_message = MessageResponse(
+            id=str(uuid.uuid4()),
+            content=f"Hello {name}! 🍽️ I'm FoodieBot, your personal restaurant and food discovery assistant! I'm excited to help you explore the amazing culinary scene in {location}.\n\nI can help you with:\n🍕 Restaurant recommendations with real data and images\n🥘 Cuisine suggestions\n☕ Cafe discoveries\n💰 Budget-friendly options\n🌟 Fine dining experiences\n🥗 Dietary preferences\n\nI'll show you restaurant cards with photos, ratings, and contact info. Use the like/dislike buttons to help me learn your preferences!\n\nWhat are you craving today, or what kind of dining experience are you looking for?",
+            sender="bot",
+            timestamp=datetime.now()
+        )
+        
+        chat_session = ChatSession(
+            id=session_id,
+            user_profile=standardized_profile,
+            messages=[initial_message],
+            created_at=datetime.now()
+        )
+        
+        chat_sessions[session_id] = chat_session
+        
+        print(f"Created session: {session_id} for user: {user_id}")
+        
+        return {"user_id": user_id, "session_id": session_id, "message": "User registered successfully"}
     
-    # Inital chat session creation
-    session_id = str(uuid.uuid4())
-    initial_message = MessageResponse(
-        id=str(uuid.uuid4()),
-        content=f"Hello {user_profile.name}! 🍽️ I'm FoodieBot, your personal restaurant and food discovery assistant! I'm excited to help you explore the amazing culinary scene in {user_profile.location}.\n\nI can help you with:\n🍕 Restaurant recommendations with real data and images\n🥘 Cuisine suggestions\n☕ Cafe discoveries\n💰 Budget-friendly options\n🌟 Fine dining experiences\n🥗 Dietary preferences\n\nI'll show you restaurant cards with photos, ratings, and contact info. Use the like/dislike buttons to help me learn your preferences!\n\nWhat are you craving today, or what kind of dining experience are you looking for?",
-        sender="bot",
-        timestamp=datetime.now()
-    )
-    
-    chat_session = ChatSession(
-        id=session_id,
-        user_profile=user_profile,
-        messages=[initial_message],
-        created_at=datetime.now()
-    )
-    
-    chat_sessions[session_id] = chat_session
-    
-    return {"user_id": user_id, "session_id": session_id, "message": "User registered successfully"}
+    except Exception as e:
+        print(f"Error in register_user: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/chat")
 async def chat(chat_message: ChatMessage):
