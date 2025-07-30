@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Heart, ThumbsDown, Info, Star, Phone, Globe, MapPin, ExternalLink, Clock, Utensils, CreditCard, Armchair as Wheelchair, Baby, Car, Beer, Wifi, ParkingCircle, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { authService } from '../services/authService';
+import type { UserData } from '../services/authService';
 import axios from 'axios';
 
 interface Restaurant {
@@ -19,12 +21,14 @@ interface Restaurant {
 interface RestaurantCardProps {
   restaurant: Restaurant;
   sessionId: string;
+  userData: UserData;
   onPreferenceSaved: (restaurantId: string, preference: 'like' | 'dislike') => void;
 }
 
 export const RestaurantCard: React.FC<RestaurantCardProps> = ({ 
   restaurant, 
   sessionId, 
+  userData,
   onPreferenceSaved 
 }) => {
   const [userPreference, setUserPreference] = useState<'like' | 'dislike' | null>(null);
@@ -37,51 +41,80 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const handlePreference = async (preference: 'like' | 'dislike') => {
+    if (!userData || !userData.uid) {
+      console.error('User must be logged in to submit feedback');
+      alert('Please log in to rate restaurants');
+      return;
+    }
+
     setPendingPreference(preference);
     setShowFeedbackModal(true);
   };
 
   const handleFeedbackSubmit = async () => {
-    if (!pendingPreference) return;
-    
+    if (!userData || !userData.uid) {
+      console.error('User not authenticated — cannot submit feedback');
+      alert('Please log in again to submit feedback.');
+      return;
+    }
+
+    if (!pendingPreference) {
+      console.error('No preference selected — cannot submit feedback');
+      alert('Please select like or dislike before submitting feedback.');
+      return;
+    }
+
     setIsSubmittingFeedback(true);
     
-    try {
+  try {
       await axios.post('http://localhost:8000/api/restaurant-preference', {
         restaurant_id: restaurant.id,
         preference: pendingPreference,
         session_id: sessionId,
         feedback: feedbackText.trim() || null
       });
-      
-      setUserPreference(pendingPreference);
-      onPreferenceSaved(restaurant.id, pendingPreference);
-      
-      // Reset feedback modal state
-      setShowFeedbackModal(false);
-      setFeedbackText('');
-      setPendingPreference(null);
-      
-      // Store feedback locally as well
-      const feedbackData = {
+
+    // Send to Firebase
+    await authService.saveUserFeedback({
+      userId: userData.uid,
+      sessionId,
+      restaurantId: restaurant.id,
+      restaurantName: restaurant.name,
+      preference: pendingPreference,
+      feedback: feedbackText.trim() || null,
+      timestamp: new Date()
+    });
+
+    setUserPreference(pendingPreference);
+    onPreferenceSaved(restaurant.id, pendingPreference);
+
+    // Reset modal state
+    setShowFeedbackModal(false);
+    setFeedbackText('');
+    setPendingPreference(null);
+
+    // Store in localStorage
+    const feedbackData = {
         restaurantId: restaurant.id,
         restaurantName: restaurant.name,
         preference: pendingPreference,
         feedback: feedbackText.trim(),
         timestamp: new Date().toISOString()
       };
-      
-      // Store in localStorage
-      const existingFeedback = JSON.parse(localStorage.getItem('restaurantFeedback') || '[]');
-      existingFeedback.push(feedbackData);
-      localStorage.setItem('restaurantFeedback', JSON.stringify(existingFeedback));
-      
-    } catch (error) {
-      console.error('Error saving preference and feedback:', error);
-    } finally {
-      setIsSubmittingFeedback(false);
-    }
-  };
+
+    const existingFeedback = JSON.parse(localStorage.getItem('restaurantFeedback') || '[]');
+    existingFeedback.push(feedbackData);
+    localStorage.setItem('restaurantFeedback', JSON.stringify(existingFeedback));
+
+    console.log('Feedback saved successfully to Firebase and localStorage');
+
+  } catch (error) {
+    console.error('Error saving preference and feedback:', error);
+    alert('Failed to save feedback. Please try again.');
+  } finally {
+    setIsSubmittingFeedback(false);
+  }
+};
 
   const handleFeedbackCancel = () => {
     setShowFeedbackModal(false);
@@ -480,7 +513,7 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
         </div>
       )}
       {/* Feedback Modal */}
-      {showFeedbackModal && (
+      {showFeedbackModal && pendingPreference && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
