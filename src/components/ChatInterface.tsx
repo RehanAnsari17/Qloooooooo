@@ -2,18 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, ChatMessage } from '../App';
 import { RestaurantRecommendations } from './RestaurantRecommendations';
 import { Send, Square, Loader, Bot, User, History } from 'lucide-react';
+import { authService, UserData } from '../services/authService';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ChatInterfaceProps {
   sessionId: string;
   userProfile: UserProfile;
+  userData: UserData;
   onViewHistory: () => void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   sessionId, 
   userProfile, 
+  userData,
   onViewHistory 
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -32,6 +35,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    // Save chat session to Firebase whenever messages change (with debounce)
+    if (messages.length > 0 && userData) {
+      const timeoutId = setTimeout(() => {
+        saveChatToFirebase();
+      }, 1000); // Debounce for 1 second
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [messages, userData, sessionId]);
+
   const loadChatSession = async () => {
     try {
       const response = await axios.get(`http://localhost:8000/api/chat-session/${sessionId}`);
@@ -42,6 +56,51 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
+  const saveChatToFirebase = async () => {
+    try {
+      if (!userData || !sessionId) {
+        console.log('Missing userData or sessionId, skipping Firebase save');
+        return;
+      }
+
+      const chatSession = {
+        userId: userData.uid,
+        userProfile: {
+          name: userProfile.name,
+          age: userProfile.age,
+          location: userProfile.location
+        },
+        messages: messages.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          sender: msg.sender,
+          timestamp: new Date(msg.timestamp),
+          restaurants: msg.restaurants || []
+        })),
+        isActive: !isChatEnded,
+        createdAt: new Date(),
+        endedAt: isChatEnded ? new Date() : null
+      };
+
+      // Always try to update/create the session
+      await authService.updateChatSession(sessionId, chatSession);
+      console.log('Chat session saved to Firebase successfully');
+      
+    } catch (error) {
+      console.error('Error saving chat to Firebase:', error);
+      // Try to save with a new session ID if the current one fails
+      try {
+        const newSessionData = {
+          ...chatSession,
+          userId: userData.uid
+        };
+        const newSessionId = await authService.saveChatSession(newSessionData);
+        console.log('Created new session with ID:', newSessionId);
+      } catch (fallbackError) {
+        console.error('Fallback save also failed:', fallbackError);
+      }
+    }
+  };
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -80,6 +139,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       await axios.post(`http://localhost:8000/api/end-chat/${sessionId}`);
       setIsChatEnded(true);
+      
+      // Update Firebase with ended status
+      await authService.updateChatSession(sessionId, {
+        isActive: false,
+        endedAt: new Date()
+      });
+      
       loadChatSession();
     } catch (error) {
       console.error('Error ending chat:', error);
@@ -194,6 +260,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   <RestaurantRecommendations 
                     restaurants={message.restaurants}
                     sessionId={sessionId}
+                    userData={userData}
                   />
                 </div>
               )}
